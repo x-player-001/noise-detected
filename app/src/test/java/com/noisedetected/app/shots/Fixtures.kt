@@ -10,6 +10,7 @@ import com.noisedetected.core.analysis.DisplayFrame
 import com.noisedetected.core.compare.Condition
 import com.noisedetected.core.dsp.Spectrum
 import com.noisedetected.core.inference.Candidate
+import com.noisedetected.core.inference.InferenceGate
 import com.noisedetected.core.inference.InferenceResult
 import com.noisedetected.core.inference.SourceType
 import com.noisedetected.core.survey.LocationKind
@@ -59,9 +60,7 @@ object Fixtures {
     fun renderer(frames: Int = 320): DisplayRenderer {
         val r = DisplayRenderer()
         for (t in 0 until frames) {
-            val fast = spectrum(2048, t, pumpPeaks(t))
-            val fine = spectrum(8192, 10_000 + t, pumpPeaks(t))
-            r.onDisplay(DisplayFrame(4.0 + t * 0.05, fast, fine))
+            r.onDisplay(DisplayFrame(4.0 + t * 0.05, spectrum(2048, t, pumpPeaks(t))))
         }
         return r
     }
@@ -90,8 +89,8 @@ object Fixtures {
     val liveIdle = LiveState()
 
     val liveAnalyzing = LiveState(
-        running = true, elapsedSec = 4, sourceLabel = "未处理音源（UNPROCESSED）",
-        inference = InferenceResult(emptyList(), listOf("正在采集，请保持手机静止…"), false, 4.0, null),
+        running = true, elapsedSec = 11, sourceLabel = "未处理音源（UNPROCESSED）",
+        inference = InferenceResult(emptyList(), listOf(InferenceGate.PENDING_NOTE), false, 7.0, null),
     )
 
     val liveDone = liveRunning.copy(running = false, canSave = true, showPeakHold = false)

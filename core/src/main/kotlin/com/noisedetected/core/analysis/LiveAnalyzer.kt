@@ -5,6 +5,7 @@ import com.noisedetected.core.dsp.RingBuffer
 import com.noisedetected.core.dsp.Spectrum
 import com.noisedetected.core.dsp.SpectrumAnalyzer
 import com.noisedetected.core.dsp.toDb
+import com.noisedetected.core.inference.InferenceGate
 import com.noisedetected.core.inference.InferenceResult
 import com.noisedetected.core.inference.SourceInference
 import kotlin.math.max
@@ -35,12 +36,13 @@ class AnalysisFrame(
     val inference: InferenceResult,
 )
 
-/** 每 displayHopSec 一次的显示数据。两个谱都引用分析器内部复用的数组，只在回调期间有效。 */
+/**
+ * 每 displayHopSec 一次的显示数据。用 1 s 窗的快谱：细谱窗长 4 s，变化要 4 s 才完全反映出来，显示会像慢动作。
+ * 谱引用分析器内部复用的数组，只在回调期间有效。
+ */
 class DisplayFrame(
     val timeSec: Double,
     val fast: Spectrum,
-    /** 采集满 fineSize 之前为 null。 */
-    val fine: Spectrum?,
 )
 
 fun interface DisplaySink {
@@ -74,13 +76,13 @@ class LiveAnalyzer(private val inputRate: Int, val config: AnalyzerConfig = Anal
     private val fastPower = DoubleArray(config.fastSize / 2 + 1)
     private val finePower = DoubleArray(config.fineSize / 2 + 1)
     private val fastSpectrum = Spectrum(sampleRate, config.fastSize, fastPower)
-    private val fineSpectrum = Spectrum(sampleRate, config.fineSize, finePower)
 
     private val displayHopSamples = max(1, (sampleRate * config.displayHopSec).roundToInt())
     private val analysisEvery = max(1, (config.hopSec / config.displayHopSec).roundToInt())
     private var sinceTick = 0
     private var ticks = 0L
     private val tracker = ToneTracker(config.trackWindowSec)
+    private val gate = InferenceGate()
     private val pending = ArrayList<AnalysisFrame>()
 
     fun process(input: FloatArray, length: Int = input.size): List<AnalysisFrame> {
@@ -95,6 +97,7 @@ class LiveAnalyzer(private val inputRate: Int, val config: AnalyzerConfig = Anal
         ring.clear()
         rawRing.clear()
         tracker.clear()
+        gate.reset()
         sinceTick = 0
         ticks = 0
     }
@@ -114,21 +117,22 @@ class LiveAnalyzer(private val inputRate: Int, val config: AnalyzerConfig = Anal
         val sink = displaySink
         if (sink == null && !analysisDue) return
 
+        if (sink != null) {
+            ring.latest(config.fastSize, scratch)
+            fastAnalyzer.computeInto(scratch, 0, fastPower)
+            sink.onDisplay(DisplayFrame(time, fastSpectrum))
+        }
+        if (!analysisDue) return
         val hasFine = ring.count >= config.fineSize
         if (hasFine) {
             ring.latest(config.fineSize, scratch)
             fineAnalyzer.computeInto(scratch, 0, finePower)
         }
-        if (sink != null) {
-            ring.latest(config.fastSize, scratch)
-            fastAnalyzer.computeInto(scratch, 0, fastPower)
-            sink.onDisplay(DisplayFrame(time, fastSpectrum, if (hasFine) fineSpectrum else null))
-        }
-        if (analysisDue) pending += analyze(time, hasFine)
+        pending += analyze(time, hasFine)
     }
 
     private fun analyze(time: Double, hasFine: Boolean): AnalysisFrame {
-        if (!hasFine) return AnalysisFrame(time, null, emptyList(), null, null, SourceInference.infer(null))
+        if (!hasFine) return AnalysisFrame(time, null, emptyList(), null, null, gate.accept(SourceInference.infer(null)))
         val fineRaw = Spectrum(sampleRate, config.fineSize, finePower.copyOf())
 
         val peaks = PeakDetector.find(fineRaw, config.minHz, config.maxHz)
@@ -159,7 +163,7 @@ class LiveAnalyzer(private val inputRate: Int, val config: AnalyzerConfig = Anal
             peaks = peaks,
             harmonics = harmonics,
             features = features,
-            inference = SourceInference.infer(features),
+            inference = gate.accept(SourceInference.infer(features)),
         )
     }
 }

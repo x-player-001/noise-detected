@@ -56,8 +56,7 @@ class DisplayRenderer(
     val version: StateFlow<Long> = _version.asStateFlow()
 
     override fun onDisplay(frame: DisplayFrame) {
-        // 曲线优先用细谱（低频分辨率高），细谱就绪前用快谱
-        project(frame.fine ?: frame.fast, colPower)
+        project(frame.fast, colPower)
         val resetHold = holdResetRequested
         holdResetRequested = false
         var maxDb = -200.0
@@ -76,7 +75,7 @@ class DisplayRenderer(
         hasData = true
         updateAxis(maxDb, frame.timeSec)
 
-        // 瀑布图用快谱（1 s 窗），跟得上变化
+        // 瀑布图不平滑，直接用当前帧
         project(frame.fast, row)
         for (i in 0 until columns) rowDb[i] = toDb(row[i])
         System.arraycopy(rowDb, 0, sortBuf, 0, columns)
@@ -168,8 +167,8 @@ class DisplayRenderer(
     }
 
     companion object {
-        /** 每 50 ms 的平滑系数，时间常数约 0.15 s。 */
-        private const val SMOOTHING = 0.3
+        /** 每 50 ms 的平滑系数，时间常数约 70 ms：只去掉逐帧抖动，不拖慢变化。 */
+        private const val SMOOTHING = 0.5
         private const val WATERFALL_RANGE_DB = 50.0
 
         /** 暖色调色带（黑 → 深棕 → 琥珀 → 奶白），与界面的琥珀强调色一致。 */

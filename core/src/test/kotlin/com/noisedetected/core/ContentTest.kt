@@ -1,6 +1,7 @@
 package com.noisedetected.core
 
 import com.noisedetected.core.Signals.Tone
+import com.noisedetected.core.analysis.LiveAnalyzer
 import com.noisedetected.core.analysis.analyzeSignal
 import com.noisedetected.core.inference.InferenceResult
 import com.noisedetected.core.inference.SourceType
@@ -52,6 +53,23 @@ class ContentTest {
         val r = infer(Wav.mix(female.samples, tone))
         assertEquals(describe(r), SourceType.AUDIBLE_CONTENT, r.top?.type)
         assertNotEquals(describe(r), SourceType.TRANSFORMER, r.candidates.getOrNull(1)?.type)
+    }
+
+    /** 测量过程中的每一帧都不能给出误导性的结论：结论在稳定之前不发布。 */
+    @Test
+    fun noMisleadingConclusionWhileMeasuring() {
+        val tone = Signals.gate(Signals.tones(rate, 45.0, listOf(Tone(200.0, 0.05)), noise = 0.0), rate, 10.0, 10.0, floor = 0.0)
+        val signal = Wav.mix(female.samples, tone)
+        val analyzer = LiveAnalyzer(rate)
+        val shown = mutableListOf<Pair<Double, SourceType>>()
+        for (i in signal.indices step 800) {
+            analyzer.process(signal.copyOfRange(i, minOf(i + 800, signal.size))).forEach { f ->
+                f.inference.top?.let { shown += f.timeSec to it.type }
+            }
+        }
+        assertTrue("没有给出任何结论", shown.isNotEmpty())
+        assertTrue("过早给出结论：${shown.first()}", shown.first().first >= 15.0)
+        assertTrue("出现误导结论：${shown.filter { it.second != SourceType.AUDIBLE_CONTENT }.take(3)}", shown.all { it.second == SourceType.AUDIBLE_CONTENT })
     }
 
     @Test

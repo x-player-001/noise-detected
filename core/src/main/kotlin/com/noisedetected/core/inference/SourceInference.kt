@@ -14,6 +14,8 @@ enum class SourceType {
     INTERMITTENT,
     BROADBAND,
     AUDIBLE_CONTENT,
+    /** 麦克风没有输入：提示检查权限或占用，不是对声源的判断。 */
+    NO_SIGNAL,
     UNKNOWN,
 }
 
@@ -71,7 +73,7 @@ object SourceInference {
         }
         if (features.bandLevelDb < SILENCE_DB) {
             val silent = Candidate(
-                SourceType.UNKNOWN, "没有收到声音信号", 1.0,
+                SourceType.NO_SIGNAL, "没有收到声音信号", 1.0,
                 "麦克风几乎没有输入。",
                 "检查是否授予了麦克风权限、麦克风是否被其他应用（通话、录音）占用，或者麦克风孔是否被手机壳挡住。",
             )

@@ -7,6 +7,7 @@ import com.noisedetected.core.inference.SourceType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,9 +82,10 @@ class InferenceTest {
     }
 
     @Test
-    fun shortObservationIsNotReady() {
+    fun shortObservationGivesNoConclusionYet() {
         val r = infer(Signals.tones(rate, 12.0, listOf(Tone(100.0, 0.2))))
         assertFalse(r.ready)
-        assertTrue(r.notes.any { it.contains("30 秒") })
+        assertTrue(describe(r), r.candidates.isEmpty())
+        assertNull(r.mainFrequencyHz)
     }
 }

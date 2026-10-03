@@ -35,6 +35,7 @@ import com.noisedetected.app.LiveState
 import com.noisedetected.app.ui.theme.Palette
 import com.noisedetected.app.ui.theme.Type
 import com.noisedetected.core.compare.Condition
+import com.noisedetected.core.inference.InferenceGate
 import com.noisedetected.core.inference.InferenceResult
 import kotlin.math.roundToInt
 
@@ -137,7 +138,11 @@ private fun Hero(state: LiveState) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            top?.title ?: if (state.running) "正在识别声源…" else "等待测量",
+            top?.title ?: when {
+                !state.running -> "等待测量"
+                state.elapsedSec < InferenceGate.FIRST_RESULT_SEC -> "正在分析，约 ${InferenceGate.FIRST_RESULT_SEC.toInt() - state.elapsedSec} 秒后给出结论"
+                else -> "正在确认结论…"
+            },
             style = Type.Heading,
             color = if (top != null) Palette.Accent else Palette.TextMid,
         )
@@ -186,10 +191,12 @@ private fun GuidePanel() {
 @Composable
 private fun AnalyzingPanel(state: LiveState, result: InferenceResult) {
     Panel {
+        // 结论要等稳定后才发布，可能比预计晚几秒，进度停在 95% 等待
+        val progress = (state.elapsedSec / InferenceGate.FIRST_RESULT_SEC.toFloat()).coerceIn(0f, 0.95f)
         SectionLabel("分析中", "ANALYZING") {
-            Text("${(state.elapsedSec / 20f * 100).roundToInt().coerceAtMost(100)}%", style = Type.NumberSmall, color = Palette.Accent)
+            Text("${(progress * 100).roundToInt()}%", style = Type.NumberSmall, color = Palette.Accent)
         }
-        Meter((state.elapsedSec / 20f).coerceIn(0f, 1f))
+        Meter(progress)
         result.notes.forEach { Text(it, style = Type.BodySmall, color = Palette.TextMid) }
     }
 }
