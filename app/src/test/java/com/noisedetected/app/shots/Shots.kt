@@ -5,7 +5,9 @@ import androidx.compose.ui.Modifier
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.noisedetected.app.AppFrame
+import com.noisedetected.app.FinderState
 import com.noisedetected.app.LiveState
+import com.noisedetected.app.SurveyState
 import com.noisedetected.app.ui.CompareScreen
 import com.noisedetected.app.ui.IdentifyScreen
 import com.noisedetected.app.ui.RecordsScreen
@@ -23,7 +25,7 @@ class Shots {
     }
 
     private fun identify(state: LiveState, withData: Boolean = true) = shot(0) {
-        IdentifyScreen(state, if (withData) Fixtures.renderer() else com.noisedetected.app.ui.DisplayRenderer(), {}, {}, {}, { _, _ -> }, {}, it)
+        IdentifyScreen(state, if (withData) Fixtures.renderer() else com.noisedetected.app.ui.DisplayRenderer(), {}, {}, {}, { _, _ -> }, {}, {}, it)
     }
 
     @Test fun identifyRunning() = identify(Fixtures.liveRunning)
@@ -31,8 +33,14 @@ class Shots {
     @Test fun identifyAnalyzing() = identify(Fixtures.liveAnalyzing)
     @Test fun identifyDone() = identify(Fixtures.liveDone)
 
-    @Test fun survey() = shot(1) { SurveyScreen(Fixtures.survey, true, {}, {}, { _, _ -> }, {}, {}, {}, {}, it) }
-    @Test fun surveyEmpty() = shot(1) { SurveyScreen(Fixtures.surveyEmpty, false, {}, {}, { _, _ -> }, {}, {}, {}, {}, it) }
+    private fun survey(state: SurveyState, finder: FinderState = FinderState(), hasTone: Boolean = true) = shot(1) {
+        SurveyScreen(state, finder, hasTone, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, it)
+    }
+
+    @Test fun survey() = survey(Fixtures.survey)
+    @Test fun surveyEmpty() = survey(Fixtures.surveyEmpty, hasTone = false)
+    @Test fun surveyFinderIdle() = survey(Fixtures.surveyIdle)
+    @Test fun surveyFinder() = survey(Fixtures.surveyIdle, Fixtures.finderRunning)
 
     @Test fun records() = shot(2) { RecordsScreen(Fixtures.records, {}, {}, {}, it) }
     @Test fun recordsEmpty() = shot(2) { RecordsScreen(emptyList(), {}, {}, {}, it) }

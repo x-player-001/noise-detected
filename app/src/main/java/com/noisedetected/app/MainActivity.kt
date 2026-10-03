@@ -67,6 +67,7 @@ private fun App(vm: NoiseViewModel = viewModel()) {
     val context = LocalContext.current
     val live by vm.live.collectAsStateWithLifecycle()
     val survey by vm.survey.collectAsStateWithLifecycle()
+    val finder by vm.finder.collectAsStateWithLifecycle()
     val records by vm.records.collectAsStateWithLifecycle()
     val compare by vm.compare.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -97,10 +98,12 @@ private fun App(vm: NoiseViewModel = viewModel()) {
                 onTogglePeakHold = vm::togglePeakHold,
                 onSave = vm::saveMeasurement,
                 onDismissMessage = vm::dismissMessage,
+                onFindSource = { withMic { if (vm.findIdentifiedSource()) tab = 1 } },
                 modifier = modifier,
             )
             1 -> SurveyScreen(
                 state = survey,
+                finder = finder,
                 hasIdentifiedTone = live.mainFrequencyHz != null,
                 onUseIdentifiedTone = { vm.useCurrentToneAsTarget() },
                 onSetTarget = vm::setTarget,
@@ -109,6 +112,8 @@ private fun App(vm: NoiseViewModel = viewModel()) {
                 onRemoveLastPoint = vm::removeLastPoint,
                 onRemoveLocation = vm::removeLocation,
                 onStop = vm::stop,
+                onStartFinder = { withMic(vm::startFinder) },
+                onResetFinderMax = vm::resetFinderMax,
                 modifier = modifier,
             )
             else -> {

@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.noisedetected.app.FinderState
 import com.noisedetected.app.SurveyState
 import com.noisedetected.app.ui.theme.Palette
 import com.noisedetected.app.ui.theme.Type
@@ -53,6 +54,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SurveyScreen(
     state: SurveyState,
+    finder: FinderState,
     hasIdentifiedTone: Boolean,
     onUseIdentifiedTone: () -> Unit,
     onSetTarget: (SurveyTarget) -> Unit,
@@ -61,11 +63,13 @@ fun SurveyScreen(
     onRemoveLastPoint: (Long) -> Unit,
     onRemoveLocation: (Long) -> Unit,
     onStop: () -> Unit,
+    onStartFinder: () -> Unit,
+    onResetFinderMax: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showAdd by remember { mutableStateOf(false) }
     var showManual by remember { mutableStateOf(false) }
-    val busy = state.measuringId != null
+    val busy = state.measuringId != null || finder.running
 
     Column(modifier.fillMaxSize().background(Palette.Bg)) {
         ScreenHeader("位置巡测", "SOURCE LOCATOR")
@@ -86,10 +90,17 @@ fun SurveyScreen(
                     }
                 }
             } else {
-                TargetPanel(target, hasIdentifiedTone, busy, onUseIdentifiedTone) { showManual = true }
-                state.report?.let { ReportPanel(it) }
+                TargetPanel(target, hasIdentifiedTone, state.measuringId != null, onUseIdentifiedTone) { showManual = true }
+                FinderPanel(finder, enabled = state.measuringId == null, onStart = onStartFinder, onStop = onStop, onResetMax = onResetFinderMax)
 
-                SectionLabel("测量位置", "LOCATIONS · ${state.locations.size}", Modifier.padding(top = 8.dp, start = 4.dp))
+                SectionLabel("逐点记录", "POINT SURVEY · 可选", Modifier.padding(top = 12.dp, start = 4.dp))
+                Text(
+                    "要给物业或邻居看可靠的对比，就在每个位置测几个点取平均，自动排名并推断方向。",
+                    style = Type.Caption,
+                    color = Palette.TextLow,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                state.report?.let { ReportPanel(it) }
                 state.locations.forEachIndexed { i, location ->
                     LocationPanel(
                         index = i + 1,

@@ -10,6 +10,8 @@ import com.noisedetected.app.data.MeasurementStore
 import com.noisedetected.app.data.StoredMeasurement
 import com.noisedetected.app.ui.DisplayRenderer
 import com.noisedetected.core.analysis.AnalysisFrame
+import com.noisedetected.core.analysis.DisplayFrame
+import com.noisedetected.core.analysis.DisplaySink
 import com.noisedetected.core.analysis.LiveAnalyzer
 import com.noisedetected.core.analysis.ToneFeatures
 import com.noisedetected.core.compare.Condition
@@ -18,11 +20,13 @@ import com.noisedetected.core.inference.InferenceResult
 import com.noisedetected.core.record.LongTermAverager
 import com.noisedetected.core.record.WavWriter
 import com.noisedetected.core.survey.LocationKind
+import com.noisedetected.core.survey.MeterReading
 import com.noisedetected.core.survey.PointMeasurer
 import com.noisedetected.core.survey.SurveyAnalyzer
 import com.noisedetected.core.survey.SurveyLocation
 import com.noisedetected.core.survey.SurveyReport
 import com.noisedetected.core.survey.SurveyTarget
+import com.noisedetected.core.survey.TargetMeter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,6 +59,14 @@ data class LiveState(
 /** 叠加对比中的一段测量。 */
 data class CompareItem(val record: StoredMeasurement, val spectrum: Spectrum)
 
+/** 实时寻声的状态，约每 0.1 s 更新一次。 */
+data class FinderState(
+    val running: Boolean = false,
+    val reading: MeterReading? = null,
+    /** 最近 [NoiseViewModel.FINDER_HISTORY] 个读数（dB），用于走势曲线，最旧在前。 */
+    val history: FloatArray = FloatArray(0),
+)
+
 data class SurveyState(
     val target: SurveyTarget? = null,
     val locations: List<SurveyLocation> = emptyList(),
@@ -64,17 +76,25 @@ data class SurveyState(
 )
 
 class NoiseViewModel(app: Application) : AndroidViewModel(app) {
-    private enum class Mode { IDLE, IDENTIFY, POINT }
+    private enum class Mode { IDLE, IDENTIFY, POINT, FIND }
 
     private val engine = AudioEngine(app)
     val renderer = DisplayRenderer()
-    private val analyzer = LiveAnalyzer(engine.sampleRate).apply { displaySink = renderer }
+    private val analyzer = LiveAnalyzer(engine.sampleRate).apply {
+        displaySink = DisplaySink { frame ->
+            renderer.onDisplay(frame)
+            if (mode == Mode.FIND) onFinderFrame(frame)
+        }
+    }
 
     private val _live = MutableStateFlow(LiveState())
     val live: StateFlow<LiveState> = _live.asStateFlow()
 
     private val _survey = MutableStateFlow(SurveyState())
     val survey: StateFlow<SurveyState> = _survey.asStateFlow()
+
+    private val _finder = MutableStateFlow(FinderState())
+    val finder: StateFlow<FinderState> = _finder.asStateFlow()
 
     private val _records = MutableStateFlow<List<StoredMeasurement>>(emptyList())
     val records: StateFlow<List<StoredMeasurement>> = _records.asStateFlow()
@@ -102,6 +122,12 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var mode = Mode.IDLE
     @Volatile private var lastTone: ToneFeatures? = null
     private var measurer: PointMeasurer? = null
+    // 寻声：只在采集线程上读写
+    private var meter: TargetMeter? = null
+    private val history = FloatArray(FINDER_HISTORY)
+    private var historyCount = 0
+    private var finderFrames = 0
+    @Volatile private var resetMaxRequested = false
     private var nextLocationId = 1L
 
     // ---- 识别 ----
@@ -117,6 +143,7 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
         averager.reset()
         recorder = WavWriter(tempWav, engine.sampleRate, MAX_RECORD_SEC)
         mode = Mode.IDENTIFY
+        _finder.update { it.copy(running = false) }
         _live.update { LiveState(running = true, showPeakHold = it.showPeakHold) }
     }
 
@@ -126,6 +153,7 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
         mode = Mode.IDLE
         _live.update { it.copy(running = false) }
         _survey.update { it.copy(measuringId = null, progress = 0f) }
+        _finder.update { it.copy(running = false) }
     }
 
     fun togglePeakHold() {
@@ -220,6 +248,8 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
     fun setTarget(target: SurveyTarget) {
         // 目标变了，旧测点不可比，清空
         _survey.update { SurveyState(target = target, locations = it.locations.map { l -> l.copy(points = emptyList()) }) }
+        // 寻声中换了目标：用新目标重新开始
+        if (_finder.value.running) startFinder()
     }
 
     fun addLocation(name: String, kind: LocationKind) {
@@ -246,9 +276,59 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
         restart {
             measurer = PointMeasurer(target)
             mode = Mode.POINT
+            _finder.update { it.copy(running = false) }
             _survey.update { it.copy(measuringId = locationId, progress = 0f) }
             _live.update { it.copy(running = true, elapsedSec = 0) }
         }
+    }
+
+    // ---- 实时寻声 ----
+
+    /** 从识别页一键寻找：锁定识别出的主频（与当前目标相同则保留已测的点）并开始寻声。 */
+    fun findIdentifiedSource(): Boolean {
+        val tone = lastTone ?: return false
+        val current = _survey.value.target
+        if (current == null || kotlin.math.abs(current.f0Hz - tone.f0Hz) > 0.5) {
+            if (!useCurrentToneAsTarget()) return false
+        }
+        startFinder()
+        return true
+    }
+
+    fun startFinder() {
+        val target = _survey.value.target ?: return
+        restart {
+            meter = TargetMeter(target)
+            historyCount = 0
+            finderFrames = 0
+            resetMaxRequested = false
+            mode = Mode.FIND
+            _survey.update { it.copy(measuringId = null, progress = 0f) }
+            _finder.value = FinderState(running = true)
+            _live.update { it.copy(running = false) }
+        }
+    }
+
+    fun resetFinderMax() {
+        resetMaxRequested = true
+    }
+
+    /** 采集线程上每个显示帧（50 ms）调用；每两帧发布一次，界面约 10 Hz 刷新。 */
+    private fun onFinderFrame(frame: DisplayFrame) {
+        val m = meter ?: return
+        if (resetMaxRequested) {
+            resetMaxRequested = false
+            m.resetMax()
+        }
+        val reading = m.add(frame.fast, frame.timeSec)
+        if (++finderFrames % 2 != 0) return
+        if (historyCount < FINDER_HISTORY) {
+            history[historyCount++] = reading.levelDb.toFloat()
+        } else {
+            System.arraycopy(history, 1, history, 0, FINDER_HISTORY - 1)
+            history[FINDER_HISTORY - 1] = reading.levelDb.toFloat()
+        }
+        _finder.value = FinderState(running = true, reading = reading, history = history.copyOf(historyCount))
     }
 
     // ---- 采集与分析 ----
@@ -272,6 +352,7 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 Log.e(TAG, "采集失败", e)
                 _live.update { it.copy(running = false, error = "录音失败：$e") }
+                _finder.update { it.copy(running = false) }
                 mode = Mode.IDLE
             } finally {
                 finishRecording()
@@ -340,6 +421,9 @@ class NoiseViewModel(app: Application) : AndroidViewModel(app) {
         private val UNSAFE_FILE_CHARS = Regex("""[\\/:*?"<>|\s]+""")
 
         private fun safeFileName(name: String) = name.replace(UNSAFE_FILE_CHARS, "_").take(40)
+
+        /** 寻声走势曲线的长度：30 s × 10 Hz。 */
+        const val FINDER_HISTORY = 300
 
         /** 每个测点：约 4 s 填满细谱缓冲 + 6 s 平均。 */
         const val POINT_SECONDS = 10.0

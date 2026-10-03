@@ -1,6 +1,7 @@
 package com.noisedetected.app.shots
 
 import com.noisedetected.app.CompareItem
+import com.noisedetected.app.FinderState
 import com.noisedetected.app.LiveState
 import com.noisedetected.app.SurveyState
 import com.noisedetected.app.data.MeasurementMeta
@@ -14,6 +15,7 @@ import com.noisedetected.core.inference.InferenceGate
 import com.noisedetected.core.inference.InferenceResult
 import com.noisedetected.core.inference.SourceType
 import com.noisedetected.core.survey.LocationKind
+import com.noisedetected.core.survey.MeterReading
 import com.noisedetected.core.survey.PointResult
 import com.noisedetected.core.survey.SurveyAnalyzer
 import com.noisedetected.core.survey.SurveyLocation
@@ -115,6 +117,26 @@ object Fixtures {
     )
 
     val surveyEmpty = SurveyState()
+
+    val surveyIdle = survey.copy(measuringId = null, progress = 0f)
+
+    /** 寻声中：30 秒内从客厅走向楼下方向，读数逐渐升高，中间一段走过墙角出现最高值。 */
+    val finderRunning: FinderState = run {
+        val n = 260
+        val rnd = Random(7)
+        val history = FloatArray(n) { i ->
+            val t = i / n.toDouble()
+            val trend = -66.0 + 14.0 * t
+            val corner = 6.0 * exp(-((t - 0.62) / 0.05).pow(2))
+            (trend + corner + rnd.nextDouble() * 1.2).toFloat()
+        }
+        val maxIndex = history.indices.maxBy { history[it] }
+        FinderState(
+            running = true,
+            reading = MeterReading(26.0, history.last().toDouble(), 17.5, history[maxIndex].toDouble(), 4.0 + maxIndex / 10.0),
+            history = history,
+        )
+    }
 
     private val day = 24 * 3600 * 1000L
     private val base = 1_790_000_000_000L

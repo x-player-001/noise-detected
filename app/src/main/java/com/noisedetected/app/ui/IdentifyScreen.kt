@@ -48,6 +48,7 @@ fun IdentifyScreen(
     onTogglePeakHold: () -> Unit,
     onSave: (String, Condition?) -> Unit,
     onDismissMessage: () -> Unit,
+    onFindSource: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showSave by remember { mutableStateOf(false) }
@@ -63,7 +64,7 @@ fun IdentifyScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(Modifier.height(4.dp))
-            Hero(state)
+            Hero(state, onFindSource)
             if (result == null) GuidePanel()
 
             Panel(padding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 16.dp, top = 18.dp, bottom = 16.dp), spacing = 12.dp) {
@@ -124,7 +125,7 @@ fun IdentifyScreen(
 
 /** 主频大读数 + 三项指标。 */
 @Composable
-private fun Hero(state: LiveState) {
+private fun Hero(state: LiveState, onFindSource: () -> Unit) {
     val result = state.inference
     val top = result?.top
     val hz = state.mainFrequencyHz
@@ -146,6 +147,10 @@ private fun Hero(state: LiveState) {
             style = Type.Heading,
             color = if (top != null) Palette.Accent else Palette.TextMid,
         )
+        if (hz != null) {
+            Spacer(Modifier.height(12.dp))
+            GhostButton("寻找这个声源  →", onFindSource, accent = true, height = 40.dp)
+        }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth().height(44.dp)) {
             Stat("时长", formatClock(state.elapsedSec), Modifier.weight(1f))
