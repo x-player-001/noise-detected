@@ -1,20 +1,29 @@
 package com.noisedetected.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -24,19 +33,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.noisedetected.app.LiveState
 import com.noisedetected.app.ui.theme.Palette
 import com.noisedetected.app.ui.theme.Type
 import com.noisedetected.core.compare.Condition
 import com.noisedetected.core.inference.InferenceGate
 import com.noisedetected.core.inference.InferenceResult
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
@@ -53,21 +71,35 @@ fun IdentifyScreen(
 ) {
     var showSave by remember { mutableStateOf(false) }
     val result = state.inference
+    val scroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    var detailsY by remember { mutableIntStateOf(0) }
 
     Column(modifier.fillMaxSize().background(Palette.Bg)) {
         ScreenHeader("声源识别", "LOW FREQUENCY ANALYZER") {
-            StatusPill(state.running, state.elapsedSec)
+            RecordControl(state.running, state.elapsedSec, if (result == null) "开始测量" else "重新测量", onStart, onStop)
         }
 
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = ScreenPadding),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = ScreenPadding),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Spacer(Modifier.height(4.dp))
-            Hero(state, onFindSource)
-            if (result == null) GuidePanel()
+            Spacer(Modifier.height(2.dp))
+            state.error?.let { Banner(it, Palette.Danger, null, onDismissMessage) }
+            state.message?.let { Banner(it, Palette.Accent, "知道了", onDismissMessage) }
 
-            Panel(padding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 16.dp, top = 18.dp, bottom = 16.dp), spacing = 12.dp) {
+            if (result == null && !state.running) {
+                GuidePanel(onStart)
+            } else {
+                ConclusionCard(
+                    state = state,
+                    onFindSource = onFindSource,
+                    onSave = { showSave = true },
+                    onShowDetails = { scope.launch { scroll.animateScrollTo(detailsY) } },
+                )
+            }
+
+            Panel(padding = PaddingValues(start = 14.dp, end = 16.dp, top = 18.dp, bottom = 16.dp), spacing = 12.dp) {
                 SectionLabel("频谱", "SPECTRUM", Modifier.padding(start = 6.dp)) {
                     ToggleChip("峰值保持", state.showPeakHold, onTogglePeakHold)
                 }
@@ -79,10 +111,8 @@ fun IdentifyScreen(
                 WaterfallView(renderer)
             }
 
-            when {
-                result == null -> {}
-                result.candidates.isEmpty() -> AnalyzingPanel(state, result)
-                else -> ResultPanel(result)
+            if (result?.top != null) {
+                Box(Modifier.onGloballyPositioned { detailsY = it.positionInParent().y.toInt() }) { DetailsPanel(result) }
             }
 
             state.sourceLabel?.let {
@@ -92,26 +122,7 @@ fun IdentifyScreen(
                     Text(it, style = Type.Caption, color = Palette.TextMid)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-        }
-
-        // 固定在底部的操作区
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = ScreenPadding, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            state.error?.let { Banner(it, Palette.Danger, null, onDismissMessage) }
-            state.message?.let { Banner(it, Palette.Accent, "知道了", onDismissMessage) }
-            if (state.running) {
-                PrimaryButton("停止测量", onStop, Modifier.fillMaxWidth(), danger = true)
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (state.canSave) {
-                        GhostButton("保存", { showSave = true }, Modifier.weight(0.38f), height = 56.dp, accent = true)
-                    }
-                    PrimaryButton(if (result == null) "开始测量" else "重新测量", onStart, Modifier.weight(0.62f))
-                }
-            }
+            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -123,102 +134,130 @@ fun IdentifyScreen(
     }
 }
 
-/** 主频大读数 + 三项指标。 */
+/** 标题栏右侧的测量控制：空闲时琥珀色「开始」，测量中红色「停止」并显示计时。 */
 @Composable
-private fun Hero(state: LiveState, onFindSource: () -> Unit) {
+private fun RecordControl(running: Boolean, seconds: Int, idleLabel: String, onStart: () -> Unit, onStop: () -> Unit) {
+    val shape = RoundedCornerShape(percent = 50)
+    if (running) {
+        val pulse = rememberInfiniteTransition(label = "rec")
+        val alpha by pulse.animateFloat(
+            initialValue = 1f, targetValue = 0.25f,
+            animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse), label = "alpha",
+        )
+        Row(
+            Modifier.height(40.dp).clip(shape).background(Palette.DangerSoft)
+                .border(1.dp, Palette.Danger.copy(alpha = 0.45f), shape)
+                .clickable(onClick = onStop).padding(start = 14.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(7.dp).alpha(alpha).background(Palette.Danger, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(formatClock(seconds), style = Type.NumberSmall.copy(fontSize = 14.sp), color = Palette.TextHigh)
+            Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(16.dp).background(Palette.Danger.copy(alpha = 0.4f)))
+            Box(Modifier.size(9.dp).background(Palette.Danger, RoundedCornerShape(2.dp)))
+            Spacer(Modifier.width(6.dp))
+            Text("停止", style = Type.BodySmall, color = Palette.Danger)
+        }
+    } else {
+        Row(
+            Modifier.height(40.dp).clip(shape).background(Palette.Accent)
+                .clickable(onClick = onStart).padding(start = 14.dp, end = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(8.dp).background(Palette.Danger, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(idleLabel, style = Type.BodySmall.copy(fontWeight = Type.Button.fontWeight), color = Palette.OnAccent)
+        }
+    }
+}
+
+/** 页面顶部的结论卡：主频 + 声源类型 + 可能性 + 依据摘要 + 操作，第一屏就能看到推断结果。 */
+@Composable
+private fun ConclusionCard(state: LiveState, onFindSource: () -> Unit, onSave: () -> Unit, onShowDetails: () -> Unit) {
+    // 刚开始测量时还没有分析结果，按"分析中"显示
     val result = state.inference
     val top = result?.top
     val hz = state.mainFrequencyHz
-    Column {
-        SectionLabel("主频", "FUNDAMENTAL")
-        Spacer(Modifier.height(6.dp))
-        Readout(
-            if (hz != null) String.format("%.1f", hz) else "00.0",
-            "Hz",
-            color = if (hz != null) Palette.TextHigh else Palette.LineStrong,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            top?.title ?: when {
-                !state.running -> "等待测量"
-                state.elapsedSec < InferenceGate.FIRST_RESULT_SEC -> "正在分析，约 ${InferenceGate.FIRST_RESULT_SEC.toInt() - state.elapsedSec} 秒后给出结论"
-                else -> "正在确认结论…"
-            },
-            style = Type.Heading,
-            color = if (top != null) Palette.Accent else Palette.TextMid,
-        )
-        if (hz != null) {
-            Spacer(Modifier.height(12.dp))
-            GhostButton("寻找这个声源  →", onFindSource, accent = true, height = 40.dp)
+    Panel(border = if (top != null) Palette.Accent.copy(alpha = 0.35f) else Palette.Line, spacing = 12.dp) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                SectionLabel("主频", "FUNDAMENTAL")
+                Spacer(Modifier.height(4.dp))
+                Readout(
+                    if (hz != null) String.format("%.1f", hz) else "00.0", "Hz",
+                    style = Type.Display,
+                    color = if (hz != null) Palette.TextHigh else Palette.LineStrong,
+                )
+            }
+            if (top != null) {
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("可能性", style = Type.Caption, color = Palette.TextLow)
+                    Text("${(top.confidence * 100).roundToInt()}%", style = Type.Number.copy(fontSize = 22.sp), color = Palette.TextHigh)
+                    Tag(
+                        when {
+                            !result!!.ready -> "初步"
+                            top.confidence >= 0.6 -> "较可信"
+                            else -> "仅供参考"
+                        },
+                        color = if (result!!.ready && top.confidence >= 0.6) Palette.Positive else Palette.Accent,
+                        filled = true,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(18.dp))
-        Row(Modifier.fillMaxWidth().height(44.dp)) {
-            Stat("时长", formatClock(state.elapsedSec), Modifier.weight(1f))
-            VerticalHairline()
-            Stat("可能性", top?.let { "${(it.confidence * 100).roundToInt()}%" } ?: "—", Modifier.weight(1f).padding(start = 16.dp))
-            VerticalHairline()
-            Stat(
-                "结论",
-                // 测量时长够了也不等于判断有把握，按可能性分档
+
+        if (top == null) {
+            // 结论还没发布：显示剩余时间和进度
+            val progress = (state.elapsedSec / InferenceGate.FIRST_RESULT_SEC.toFloat()).coerceIn(0f, 0.95f)
+            Text(
                 when {
-                    top == null -> "—"
-                    !result.ready -> "初步"
-                    top.confidence >= 0.6 -> "较可信"
-                    else -> "仅供参考"
+                    !state.running -> "测量时间太短，没有得出结论。请重新测量 30 秒以上。"
+                    state.elapsedSec < InferenceGate.FIRST_RESULT_SEC -> "正在分析，约 ${InferenceGate.FIRST_RESULT_SEC.toInt() - state.elapsedSec} 秒后给出结论"
+                    else -> "正在确认结论…"
                 },
-                Modifier.weight(1f).padding(start = 16.dp),
+                style = Type.Body,
+                color = Palette.TextMid,
             )
+            if (state.running) {
+                Meter(progress)
+                Text("正在排除电视、说话、音乐等干扰，请保持安静、手机放稳。", style = Type.Caption, color = Palette.TextLow)
+            }
+            result?.notes?.filter { it != InferenceGate.PENDING_NOTE }?.forEach { Text(it, style = Type.Caption, color = Palette.TextLow) }
+            return@Panel
+        }
+
+        Text(top.title, style = Type.Heading, color = Palette.Accent)
+        Text(top.reason, style = Type.BodySmall, color = Palette.TextMid, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (hz != null) GhostButton("寻找这个声源 →", onFindSource, accent = true, height = 36.dp)
+            if (state.canSave) GhostButton("保存", onSave, height = 36.dp)
+            Spacer(Modifier.weight(1f))
+            TextAction("排查建议 ↓", onShowDetails, color = Palette.TextMid)
         }
     }
 }
 
 @Composable
-private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = Type.Caption, color = Palette.TextLow)
-        Text(value, style = Type.Number.copy(fontSize = Type.Heading.fontSize), color = Palette.TextHigh)
-    }
-}
-
-@Composable
-private fun VerticalHairline() {
-    Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Line))
-}
-
-@Composable
-private fun GuidePanel() {
+private fun GuidePanel(onStart: () -> Unit) {
     Panel {
         SectionLabel("测量方法", "HOW TO MEASURE")
         Step(1, "到声音最明显的房间", "关掉家里的空调、冰箱、风扇等设备，排除自家干扰。")
         Step(2, "手机平放在桌面或地板上", "不要拿在手里，手的动作会带来低频干扰。")
-        Step(3, "开始测量并保持安静", "持续 30 秒以上，结论会随时间越来越可靠。")
+        Step(3, "开始测量并保持安静", "约 20 秒后给出结论，测得越久越可靠。")
+        PrimaryButton("开始测量", onStart, Modifier.fillMaxWidth(), height = 50.dp)
     }
 }
 
+/** 结论详情：完整依据、排查建议、其他可能。 */
 @Composable
-private fun AnalyzingPanel(state: LiveState, result: InferenceResult) {
-    Panel {
-        // 结论要等稳定后才发布，可能比预计晚几秒，进度停在 95% 等待
-        val progress = (state.elapsedSec / InferenceGate.FIRST_RESULT_SEC.toFloat()).coerceIn(0f, 0.95f)
-        SectionLabel("分析中", "ANALYZING") {
-            Text("${(progress * 100).roundToInt()}%", style = Type.NumberSmall, color = Palette.Accent)
-        }
-        Meter(progress)
-        result.notes.forEach { Text(it, style = Type.BodySmall, color = Palette.TextMid) }
-    }
-}
-
-@Composable
-private fun ResultPanel(result: InferenceResult) {
+private fun DetailsPanel(result: InferenceResult) {
     val top = result.top!!
     Panel {
-        SectionLabel("判断依据", "REASONING") {
-            Tag(if (result.ready) "推断结果" else "继续测量中", color = if (result.ready) Palette.Positive else Palette.Accent, filled = true)
-        }
+        SectionLabel("判断依据", "REASONING")
         Text(top.reason, style = Type.Body, color = Palette.TextHigh)
         Hairline()
         SectionLabel("排查建议", "NEXT STEPS")
-        Text(top.advice, style = Type.BodySmall, color = Palette.TextMid)
+        Text(top.advice, style = Type.Body, color = Palette.TextMid)
 
         val others = result.candidates.drop(1)
         if (others.isNotEmpty()) {

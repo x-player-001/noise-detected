@@ -1,11 +1,5 @@
 package com.noisedetected.app.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,11 +26,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -240,36 +232,6 @@ fun Meter(fraction: Float, modifier: Modifier = Modifier, color: Color = Palette
         drawRoundRect(Palette.Line, cornerRadius = r)
         val w = size.width * fraction.coerceIn(0f, 1f)
         if (w > 0f) drawRoundRect(color, size = Size(w, size.height), cornerRadius = r)
-    }
-}
-
-/** 状态指示：测量中红点呼吸 + 计时，空闲时灰色。 */
-@Composable
-fun StatusPill(running: Boolean, seconds: Int, modifier: Modifier = Modifier) {
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val alpha by pulse.animateFloat(
-        initialValue = 1f, targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse), label = "alpha",
-    )
-    Row(
-        modifier
-            .clip(PillShape)
-            .background(if (running) Palette.DangerSoft else Palette.Surface)
-            .border(1.dp, if (running) Palette.Danger.copy(alpha = 0.35f) else Palette.Line, PillShape)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(7.dp)
-                .alpha(if (running) alpha else 1f)
-                .background(if (running) Palette.Danger else Palette.TextLow, CircleShape),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            if (running) "REC  ${formatClock(seconds)}" else "STANDBY",
-            style = Type.NumberSmall.copy(letterSpacing = 1.2.sp),
-            color = if (running) Palette.TextHigh else Palette.TextMid,
-        )
     }
 }
 
