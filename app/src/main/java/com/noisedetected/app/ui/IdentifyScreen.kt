@@ -154,10 +154,12 @@ private fun Hero(state: LiveState) {
             VerticalHairline()
             Stat(
                 "结论",
+                // 测量时长够了也不等于判断有把握，按可能性分档
                 when {
                     top == null -> "—"
-                    result.ready -> "已确定"
-                    else -> "初步"
+                    !result.ready -> "初步"
+                    top.confidence >= 0.6 -> "较可信"
+                    else -> "仅供参考"
                 },
                 Modifier.weight(1f).padding(start = 16.dp),
             )

@@ -12,6 +12,8 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 data class AnalyzerConfig(
+    /** 曲线谱长度：2 kHz 下约 0.5 s、2 Hz 分辨率，用于实时频谱曲线，跟得上变化。 */
+    val curveSize: Int = 1024,
     /** 快谱长度：2 kHz 下约 1 s、1 Hz 分辨率，用于瀑布图。 */
     val fastSize: Int = 2048,
     /** 细谱长度：2 kHz 下约 4 s、0.24 Hz 分辨率，用于峰值和推断。 */
@@ -37,11 +39,14 @@ class AnalysisFrame(
 )
 
 /**
- * 每 displayHopSec 一次的显示数据。用 1 s 窗的快谱：细谱窗长 4 s，变化要 4 s 才完全反映出来，显示会像慢动作。
+ * 每 displayHopSec 一次的显示数据。显示不用 4 s 窗的细谱：变化要 4 s 才完全反映出来，会像慢动作。
  * 谱引用分析器内部复用的数组，只在回调期间有效。
  */
 class DisplayFrame(
     val timeSec: Double,
+    /** 0.5 s 窗，用于频谱曲线。 */
+    val curve: Spectrum,
+    /** 1 s 窗，用于瀑布图（分辨率高，相近的线能分开）。 */
     val fast: Spectrum,
 )
 
@@ -70,11 +75,14 @@ class LiveAnalyzer(private val inputRate: Int, val config: AnalyzerConfig = Anal
     private val midTopHz = minOf(3500.0, 0.45 * inputRate)
 
     private val ring = RingBuffer(config.fineSize)
+    private val curveAnalyzer = SpectrumAnalyzer(sampleRate, config.curveSize)
     private val fastAnalyzer = SpectrumAnalyzer(sampleRate, config.fastSize)
     private val fineAnalyzer = SpectrumAnalyzer(sampleRate, config.fineSize)
     private val scratch = DoubleArray(config.fineSize)
+    private val curvePower = DoubleArray(config.curveSize / 2 + 1)
     private val fastPower = DoubleArray(config.fastSize / 2 + 1)
     private val finePower = DoubleArray(config.fineSize / 2 + 1)
+    private val curveSpectrum = Spectrum(sampleRate, config.curveSize, curvePower)
     private val fastSpectrum = Spectrum(sampleRate, config.fastSize, fastPower)
 
     private val displayHopSamples = max(1, (sampleRate * config.displayHopSec).roundToInt())
@@ -120,7 +128,9 @@ class LiveAnalyzer(private val inputRate: Int, val config: AnalyzerConfig = Anal
         if (sink != null) {
             ring.latest(config.fastSize, scratch)
             fastAnalyzer.computeInto(scratch, 0, fastPower)
-            sink.onDisplay(DisplayFrame(time, fastSpectrum))
+            // 最新的 curveSize 个样本在 scratch 末尾
+            curveAnalyzer.computeInto(scratch, config.fastSize - config.curveSize, curvePower)
+            sink.onDisplay(DisplayFrame(time, curveSpectrum, fastSpectrum))
         }
         if (!analysisDue) return
         val hasFine = ring.count >= config.fineSize

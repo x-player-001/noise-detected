@@ -20,6 +20,7 @@ import com.noisedetected.core.survey.SurveyLocation
 import com.noisedetected.core.survey.SurveyTarget
 import java.io.File
 import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -33,7 +34,8 @@ object Fixtures {
         val binHz = RATE / size
         val power = DoubleArray(size / 2 + 1) { k ->
             val f = (k * binHz).coerceAtLeast(1.0)
-            val floor = 2e-10 * floorScale * (40.0 / f).pow(1.2) * (0.3 + rnd.nextDouble() * 1.4)
+            // 噪声底每个频点的功率服从指数分布（真实 FFT 的统计特性），起伏可达 ±10 dB
+            val floor = 2e-10 * floorScale * (40.0 / f).pow(1.2) * -ln(1 - rnd.nextDouble())
             var p = floor
             for ((hz, amp) in peaks) {
                 val d = (f - hz) / maxOf(binHz * 1.2, 0.35)
@@ -60,7 +62,7 @@ object Fixtures {
     fun renderer(frames: Int = 320): DisplayRenderer {
         val r = DisplayRenderer()
         for (t in 0 until frames) {
-            r.onDisplay(DisplayFrame(4.0 + t * 0.05, spectrum(2048, t, pumpPeaks(t))))
+            r.onDisplay(DisplayFrame(4.0 + t * 0.05, spectrum(1024, 20_000 + t, pumpPeaks(t)), spectrum(2048, t, pumpPeaks(t))))
         }
         return r
     }

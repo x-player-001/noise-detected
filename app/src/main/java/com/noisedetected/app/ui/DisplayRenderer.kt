@@ -29,6 +29,7 @@ class DisplayRenderer(
     private val edgeHz = DoubleArray(columns + 1) { i -> minHz * exp(ln(maxHz / minHz) * i / columns) }
 
     // 采集线程独占
+    private val raw = DoubleArray(columns)
     private val colPower = DoubleArray(columns)
     private val smoothed = DoubleArray(columns)
     private val held = DoubleArray(columns)
@@ -56,7 +57,13 @@ class DisplayRenderer(
     val version: StateFlow<Long> = _version.asStateFlow()
 
     override fun onDisplay(frame: DisplayFrame) {
-        project(frame.fast, colPower)
+        project(frame.curve, raw, peak = false)
+        // 频率方向轻微平滑（功率域 1-2-1）：压低噪声底在相邻频点间的随机起伏，窄峰只略微变矮
+        for (i in 0 until columns) {
+            val l = raw[maxOf(i - 1, 0)]
+            val r = raw[minOf(i + 1, columns - 1)]
+            colPower[i] = 0.25 * l + 0.5 * raw[i] + 0.25 * r
+        }
         val resetHold = holdResetRequested
         holdResetRequested = false
         var maxDb = -200.0
@@ -76,7 +83,7 @@ class DisplayRenderer(
         updateAxis(maxDb, frame.timeSec)
 
         // 瀑布图不平滑，直接用当前帧
-        project(frame.fast, row)
+        project(frame.fast, row, peak = true)
         for (i in 0 until columns) rowDb[i] = toDb(row[i])
         System.arraycopy(rowDb, 0, sortBuf, 0, columns)
         sortBuf.sort()
@@ -131,15 +138,23 @@ class DisplayRenderer(
         _version.value++
     }
 
-    /** 每列取所覆盖频点的最大功率；列比频点还窄时（低频段）按中心频率在相邻频点间插值，避免台阶。 */
-    private fun project(spectrum: Spectrum, out: DoubleArray) {
+    /**
+     * 把频点投影到屏幕列。列覆盖多个频点时：瀑布图取最大值（细线不被冲淡），曲线取平均值（噪声底不被抬高、不毛刺）；
+     * 列比频点还窄时（低频段）按中心频率在相邻频点间插值，避免台阶。
+     */
+    private fun project(spectrum: Spectrum, out: DoubleArray, peak: Boolean) {
         val power = spectrum.power
         for (i in 0 until columns) {
             val lo = spectrum.binOf(edgeHz[i])
             val hi = spectrum.binOf(edgeHz[i + 1])
             out[i] = if (hi - lo >= 2) {
                 var m = 0.0
-                for (k in lo..hi) if (power[k] > m) m = power[k]
+                if (peak) {
+                    for (k in lo..hi) if (power[k] > m) m = power[k]
+                } else {
+                    for (k in lo..hi) m += power[k]
+                    m /= hi - lo + 1
+                }
                 m
             } else {
                 val x = columnHz[i] / spectrum.binHz
