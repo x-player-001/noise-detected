@@ -18,7 +18,11 @@
 ```sh
 ./gradlew :core:test          # 单元测试（合成信号）
 ./gradlew :app:assembleDebug  # 输出 app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:recordPaparazziDebug  # 界面截图（模拟数据，无需模拟器），输出到 app/src/test/snapshots/images/
+./gradlew :app:verifyPaparazziDebug  # 与已提交的截图比对，检查界面是否被意外改动
 ```
+
+界面为深色仪器风格，配色、字号和通用组件集中在 `app/.../ui/theme/Theme.kt` 和 `app/.../ui/Components.kt`。截图用的模拟数据在 `app/src/test/.../shots/Fixtures.kt`。
 
 ## 已知限制
 

@@ -5,26 +5,18 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,31 +31,35 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.noisedetected.app.data.StoredMeasurement
+import com.noisedetected.app.ui.BottomNav
 import com.noisedetected.app.ui.CompareScreen
 import com.noisedetected.app.ui.IdentifyScreen
 import com.noisedetected.app.ui.RecordsScreen
 import com.noisedetected.app.ui.SurveyScreen
+import com.noisedetected.app.ui.theme.AppTheme
+import com.noisedetected.app.ui.theme.Palette
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         // 测量时屏幕常亮
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent { AppTheme { App() } }
     }
 }
 
+/** 页面骨架：内容 + 底部导航。各页面自己处理状态栏留白。 */
 @Composable
-private fun AppTheme(content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    val dark = isSystemInDarkTheme()
-    val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = colors, content = content)
+internal fun AppFrame(tab: Int, onTab: (Int) -> Unit, content: @Composable (Modifier) -> Unit) {
+    Scaffold(
+        containerColor = Palette.Bg,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = { BottomNav(tab, onTab) },
+    ) { padding -> content(Modifier.padding(padding)) }
 }
 
 @Composable
@@ -91,16 +87,7 @@ private fun App(vm: NoiseViewModel = viewModel()) {
         }
     }
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, icon = { Text("①") }, label = { Text("识别") })
-                NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, icon = { Text("②") }, label = { Text("巡测") })
-                NavigationBarItem(selected = tab == 2, onClick = { tab = 2 }, icon = { Text("③") }, label = { Text("记录") })
-            }
-        },
-    ) { padding ->
-        val modifier = Modifier.padding(padding)
+    AppFrame(tab, { tab = it }) { modifier ->
         when (tab) {
             0 -> IdentifyScreen(
                 state = live,

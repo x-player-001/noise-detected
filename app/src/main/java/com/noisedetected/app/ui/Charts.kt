@@ -5,29 +5,37 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.noisedetected.app.ui.theme.Palette
 import com.noisedetected.core.dsp.Spectrum
 import kotlin.math.ceil
 import kotlin.math.exp
@@ -36,9 +44,14 @@ import kotlin.math.ln
 private const val MIN_HZ = 10.0
 private const val MAX_HZ = 500.0
 private val FREQ_TICKS = listOf(10.0, 20.0, 50.0, 100.0, 200.0, 500.0)
-private val LEFT_PAD = 30.dp
-private val RIGHT_PAD = 12.dp
-private val BOTTOM_PAD = 16.dp
+private val LEFT_PAD = 28.dp
+private val RIGHT_PAD = 4.dp
+private val TOP_PAD = 4.dp
+private val BOTTOM_PAD = 18.dp
+
+private val axisLabel = TextStyle(fontSize = 9.sp, color = Palette.TextLow, fontFeatureSettings = "tnum", letterSpacing = 0.3.sp)
+private val markerLabel = TextStyle(fontSize = 11.sp, color = Palette.OnAccent, fontWeight = FontWeight.Medium, fontFeatureSettings = "tnum")
+private val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
 
 /** 频谱图和瀑布图共用的横轴映射，保证两张图频率对齐。 */
 private fun DrawScope.xOf(freq: Double): Float {
@@ -56,35 +69,40 @@ fun LiveSpectrumChart(
     modifier: Modifier = Modifier,
 ) {
     val measurer = rememberTextMeasurer()
-    val lineColor = MaterialTheme.colorScheme.primary
-    val holdColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val markerColor = MaterialTheme.colorScheme.error
     val version = renderer.version.collectAsStateWithLifecycle()
     val curve = remember(renderer) { FloatArray(renderer.columns) }
     val hold = remember(renderer) { FloatArray(renderer.columns) }
     val path = remember { Path() }
+    val fill = remember { Path() }
 
-    Canvas(modifier.fillMaxWidth().height(200.dp)) {
+    Canvas(modifier.fillMaxWidth().height(210.dp)) {
         version.value // 在绘制阶段读取：数据更新只触发重绘
-        val axes = drawAxes(measurer, renderer.axisTopDb, gridColor, labelColor)
+        val axes = drawAxes(measurer, renderer.axisTopDb)
         if (renderer.copyCurve(curve, if (showPeakHold) hold else null)) {
-            if (showPeakHold) drawColumns(path, renderer.columnHz, hold, holdColor, axes)
-            drawColumns(path, renderer.columnHz, curve, lineColor, axes)
+            if (showPeakHold) {
+                buildPath(path, renderer.columnHz, hold, axes)
+                drawPath(path, Palette.TextMid.copy(alpha = 0.45f), style = Stroke(width = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 4f))))
+            }
+            buildPath(path, renderer.columnHz, curve, axes)
+            fill.reset()
+            fill.addPath(path)
+            fill.lineTo(xOf(renderer.columnHz.last()), axes.bottom)
+            fill.lineTo(xOf(renderer.columnHz.first()), axes.bottom)
+            fill.close()
+            drawPath(fill, Brush.verticalGradient(listOf(Palette.Accent.copy(alpha = 0.28f), Palette.Accent.copy(alpha = 0f)), startY = axes.top, endY = axes.bottom))
+            drawPath(path, Palette.Accent, style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round))
         }
-        if (mainFrequencyHz != null) drawMarker(measurer, mainFrequencyHz, markerColor, axes.plotH)
+        if (mainFrequencyHz != null) drawMarker(measurer, mainFrequencyHz, Palette.Accent, axes)
     }
 }
 
-private fun DrawScope.drawColumns(path: Path, freqs: DoubleArray, db: FloatArray, color: Color, axes: Axes) {
+private fun DrawScope.buildPath(path: Path, freqs: DoubleArray, db: FloatArray, axes: Axes) {
     path.reset()
     for (i in freqs.indices) {
         val x = xOf(freqs[i])
         val y = axes.yOf(db[i].toDouble())
         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
-    drawPath(path, color, style = Stroke(width = 2f))
 }
 
 /** 多段平均谱叠加，点击图上任意位置把光标移到该频率。 */
@@ -96,9 +114,6 @@ fun OverlayChart(
     modifier: Modifier = Modifier,
 ) {
     val measurer = rememberTextMeasurer()
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val markerColor = MaterialTheme.colorScheme.onSurface
     val latestOnCursor by rememberUpdatedState(onCursor)
     Canvas(
         modifier.fillMaxWidth().height(240.dp).pointerInput(Unit) {
@@ -110,45 +125,54 @@ fun OverlayChart(
             }
         },
     ) {
-        val axes = drawAxes(measurer, axisTop(maxDb(curves.map { it.first })), gridColor, labelColor)
+        val axes = drawAxes(measurer, axisTop(maxDb(curves.map { it.first })))
         curves.forEach { (spectrum, color) -> drawCurve(spectrum, color, axes::yOf) }
-        drawMarker(measurer, cursorHz, markerColor, axes.plotH)
+        drawMarker(measurer, cursorHz, Palette.TextHigh, axes)
     }
 }
 
-private class Axes(val yMax: Double, val yMin: Double, val plotH: Float) {
-    fun yOf(db: Double) = (plotH * (yMax - db) / (yMax - yMin)).toFloat().coerceIn(0f, plotH)
+private class Axes(val yMax: Double, val yMin: Double, val top: Float, val bottom: Float) {
+    fun yOf(db: Double) = (top + (bottom - top) * (yMax - db) / (yMax - yMin)).toFloat().coerceIn(top, bottom)
 }
 
 /** 纵轴上限：最高点留 5 dB 余量后向上取整到 10 dB。 */
 private fun axisTop(maxDb: Double) = ceil((maxDb + 5) / 10) * 10
 
 /** 网格和刻度：纵轴从 yMax 向下跨 70 dB。 */
-private fun DrawScope.drawAxes(measurer: TextMeasurer, yMax: Double, gridColor: Color, labelColor: Color): Axes {
-    val axes = Axes(yMax, yMax - 70, size.height - BOTTOM_PAD.toPx())
-    val labelStyle = TextStyle(fontSize = 9.sp, color = labelColor)
+private fun DrawScope.drawAxes(measurer: TextMeasurer, yMax: Double): Axes {
+    val axes = Axes(yMax, yMax - 70, TOP_PAD.toPx(), size.height - BOTTOM_PAD.toPx())
+    val hair = 1.dp.toPx()
     for (db in generateSequence(axes.yMax) { it - 10 }.takeWhile { it >= axes.yMin }) {
         val y = axes.yOf(db)
-        drawLine(gridColor, Offset(xOf(MIN_HZ), y), Offset(xOf(MAX_HZ), y), 1f)
-        label(measurer, "${db.toInt()}", Offset(0f, (y - 6.dp.toPx()).coerceAtLeast(0f)), labelStyle)
+        drawLine(Palette.Line, Offset(xOf(MIN_HZ), y), Offset(xOf(MAX_HZ), y), hair)
+        val text = measurer.measure("${db.toInt()}", axisLabel)
+        drawText(text, topLeft = Offset(0f, (y - text.size.height / 2f).coerceIn(0f, size.height - text.size.height)))
     }
     for (f in FREQ_TICKS) {
         val x = xOf(f)
-        drawLine(gridColor, Offset(x, 0f), Offset(x, axes.plotH), 1f)
-        label(measurer, "${f.toInt()}", Offset((x - 8.dp.toPx()).coerceAtLeast(xOf(MIN_HZ)), axes.plotH + 2.dp.toPx()), labelStyle)
+        drawLine(Palette.Line, Offset(x, axes.top), Offset(x, axes.bottom), hair, pathEffect = dash)
+        val text = measurer.measure("${f.toInt()}", axisLabel)
+        val tx = (x - text.size.width / 2f).coerceIn(xOf(MIN_HZ), size.width - text.size.width)
+        drawText(text, topLeft = Offset(tx, axes.bottom + 5.dp.toPx()))
     }
     return axes
 }
 
-private fun DrawScope.drawMarker(measurer: TextMeasurer, freqHz: Double, color: Color, plotH: Float) {
+/** 竖向虚线 + 带底色的频率标签。 */
+private fun DrawScope.drawMarker(measurer: TextMeasurer, freqHz: Double, color: Color, axes: Axes) {
     if (freqHz !in MIN_HZ..MAX_HZ) return
     val x = xOf(freqHz)
-    drawLine(color, Offset(x, 0f), Offset(x, plotH), 2f)
-    label(
-        measurer, String.format("%.1f Hz", freqHz),
-        Offset((x + 4.dp.toPx()).coerceAtMost(size.width - 64.dp.toPx()), 2f),
-        TextStyle(fontSize = 11.sp, color = color),
-    )
+    drawLine(color.copy(alpha = 0.7f), Offset(x, axes.top), Offset(x, axes.bottom), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f)))
+    val text = measurer.measure(String.format("%.1f Hz", freqHz), markerLabel.copy(color = if (color == Palette.Accent) Palette.OnAccent else Palette.Bg))
+    val padH = 6.dp.toPx()
+    val padV = 2.dp.toPx()
+    val w = text.size.width + padH * 2
+    val h = text.size.height + padV * 2
+    val left = if (x + 6.dp.toPx() + w <= size.width) x + 6.dp.toPx() else x - 6.dp.toPx() - w
+    val top = axes.top + 4.dp.toPx()
+    drawRoundRect(color, Offset(left, top), Size(w, h), CornerRadius(h / 2))
+    drawText(text, topLeft = Offset(left + padH, top + padV))
+    drawCircle(color, radius = 2.5.dp.toPx(), center = Offset(x, top + h / 2))
 }
 
 private fun maxDb(spectra: List<Spectrum>): Double {
@@ -167,29 +191,39 @@ private fun DrawScope.drawCurve(spectrum: Spectrum, color: Color, yOf: (Double) 
         val y = yOf(spectrum.db(k))
         if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
     }
-    drawPath(path, color, style = Stroke(width = 2f))
-}
-
-private fun DrawScope.label(measurer: TextMeasurer, text: String, at: Offset, style: TextStyle) {
-    drawText(measurer, text, topLeft = at, style = style)
+    drawPath(path, color, style = Stroke(width = 1.4.dp.toPx(), join = StrokeJoin.Round))
 }
 
 /** 瀑布图：横轴对数频率（与频谱图对齐），纵轴时间，最新在上。 */
 @Composable
 fun WaterfallView(renderer: DisplayRenderer, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
     val version = renderer.version.collectAsStateWithLifecycle()
     val bitmap = remember(renderer) {
         Bitmap.createBitmap(renderer.columns, renderer.waterfallRows, Bitmap.Config.ARGB_8888)
     }
-    Canvas(modifier.fillMaxWidth().height(160.dp)) {
+    val clip = remember { Path() }
+    Canvas(modifier.fillMaxWidth().height(150.dp)) {
         version.value
         renderer.copyWaterfall(bitmap)
         val left = xOf(MIN_HZ)
-        drawImage(
-            bitmap.asImageBitmap(),
-            dstOffset = IntOffset(left.toInt(), 0),
-            dstSize = IntSize((xOf(MAX_HZ) - left).toInt(), size.height.toInt()),
-            filterQuality = FilterQuality.Low,
-        )
+        val right = xOf(MAX_HZ)
+        clip.reset()
+        clip.addRoundRect(RoundRect(left, 0f, right, size.height, CornerRadius(8.dp.toPx())))
+        clipPath(clip) {
+            drawImage(
+                bitmap.asImageBitmap(),
+                dstOffset = IntOffset(left.toInt(), 0),
+                dstSize = IntSize((right - left).toInt(), size.height.toInt()),
+                filterQuality = FilterQuality.Low,
+            )
+        }
+        // 时间刻度：300 行 = 15 秒，每 5 秒一格
+        for (i in 0..2) {
+            val y = size.height * i / 3f
+            if (i > 0) drawLine(Color.White.copy(alpha = 0.10f), Offset(left, y), Offset(right, y), 1.dp.toPx(), pathEffect = dash)
+            val text = measurer.measure("${i * 5}s", axisLabel)
+            drawText(text, topLeft = Offset(0f, if (i == 0) 0f else y - text.size.height / 2f))
+        }
     }
 }

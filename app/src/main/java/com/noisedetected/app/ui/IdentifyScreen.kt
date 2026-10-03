@@ -1,26 +1,23 @@
 package com.noisedetected.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -32,11 +29,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.noisedetected.app.LiveState
+import com.noisedetected.app.ui.theme.Palette
+import com.noisedetected.app.ui.theme.Type
 import com.noisedetected.core.compare.Condition
-import com.noisedetected.core.inference.Candidate
 import com.noisedetected.core.inference.InferenceResult
 import kotlin.math.roundToInt
 
@@ -52,54 +50,65 @@ fun IdentifyScreen(
     modifier: Modifier = Modifier,
 ) {
     var showSave by remember { mutableStateOf(false) }
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ConclusionCard(state)
+    val result = state.inference
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (state.running) "已测量 ${state.elapsedSec} 秒" else "未在测量",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(Modifier.weight(1f))
-            FilterChip(selected = state.showPeakHold, onClick = onTogglePeakHold, label = { Text("峰值保持") })
+    Column(modifier.fillMaxSize().background(Palette.Bg)) {
+        ScreenHeader("声源识别", "LOW FREQUENCY ANALYZER") {
+            StatusPill(state.running, state.elapsedSec)
         }
 
-        LiveSpectrumChart(renderer, state.showPeakHold, state.mainFrequencyHz)
-        WaterfallView(renderer)
-        Text(
-            "上：频谱（横轴为频率 Hz，纵轴为相对声级 dB）；下：瀑布图，越亮越响，最新在上。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = ScreenPadding),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Spacer(Modifier.height(4.dp))
+            Hero(state)
+            if (result == null) GuidePanel()
 
-        state.sourceLabel?.let {
-            Text("音源：$it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-
-        if (state.running) {
-            Button(
-                onClick = onStop,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            ) { Text("停止") }
-        } else {
-            Button(onClick = onStart, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text(if (state.inference == null) "开始测量" else "重新测量")
+            Panel(padding = androidx.compose.foundation.layout.PaddingValues(start = 14.dp, end = 16.dp, top = 18.dp, bottom = 16.dp), spacing = 12.dp) {
+                SectionLabel("频谱", "SPECTRUM", Modifier.padding(start = 6.dp)) {
+                    ToggleChip("峰值保持", state.showPeakHold, onTogglePeakHold)
+                }
+                LiveSpectrumChart(renderer, state.showPeakHold, state.mainFrequencyHz)
+                Hairline(Modifier.padding(vertical = 4.dp))
+                SectionLabel("瀑布图", "WATERFALL · 15 S", Modifier.padding(start = 6.dp)) {
+                    Text("越亮越响 · 最新在上", style = Type.Caption, color = Palette.TextLow)
+                }
+                WaterfallView(renderer)
             }
-            if (state.canSave) {
-                OutlinedButton(onClick = { showSave = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                    Text("保存这次测量（录音 + 频谱）")
+
+            when {
+                result == null -> {}
+                result.candidates.isEmpty() -> AnalyzingPanel(state, result)
+                else -> ResultPanel(result)
+            }
+
+            state.sourceLabel?.let {
+                Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("音源", style = Type.Caption, color = Palette.TextLow)
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, style = Type.Caption, color = Palette.TextMid)
                 }
             }
+            Spacer(Modifier.height(8.dp))
         }
-        state.message?.let { msg ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(msg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDismissMessage) { Text("知道了") }
+
+        // 固定在底部的操作区
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = ScreenPadding, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            state.error?.let { Banner(it, Palette.Danger, null, onDismissMessage) }
+            state.message?.let { Banner(it, Palette.Accent, "知道了", onDismissMessage) }
+            if (state.running) {
+                PrimaryButton("停止测量", onStop, Modifier.fillMaxWidth(), danger = true)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (state.canSave) {
+                        GhostButton("保存", { showSave = true }, Modifier.weight(0.38f), height = 56.dp, accent = true)
+                    }
+                    PrimaryButton(if (result == null) "开始测量" else "重新测量", onStart, Modifier.weight(0.62f))
+                }
             }
         }
     }
@@ -112,13 +121,132 @@ fun IdentifyScreen(
     }
 }
 
+/** 主频大读数 + 三项指标。 */
+@Composable
+private fun Hero(state: LiveState) {
+    val result = state.inference
+    val top = result?.top
+    val hz = state.mainFrequencyHz
+    Column {
+        SectionLabel("主频", "FUNDAMENTAL")
+        Spacer(Modifier.height(6.dp))
+        Readout(
+            if (hz != null) String.format("%.1f", hz) else "00.0",
+            "Hz",
+            color = if (hz != null) Palette.TextHigh else Palette.LineStrong,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            top?.title ?: if (state.running) "正在识别声源…" else "等待测量",
+            style = Type.Heading,
+            color = if (top != null) Palette.Accent else Palette.TextMid,
+        )
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth().height(44.dp)) {
+            Stat("时长", formatClock(state.elapsedSec), Modifier.weight(1f))
+            VerticalHairline()
+            Stat("可能性", top?.let { "${(it.confidence * 100).roundToInt()}%" } ?: "—", Modifier.weight(1f).padding(start = 16.dp))
+            VerticalHairline()
+            Stat(
+                "结论",
+                when {
+                    top == null -> "—"
+                    result.ready -> "已确定"
+                    else -> "初步"
+                },
+                Modifier.weight(1f).padding(start = 16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = Type.Caption, color = Palette.TextLow)
+        Text(value, style = Type.Number.copy(fontSize = Type.Heading.fontSize), color = Palette.TextHigh)
+    }
+}
+
+@Composable
+private fun VerticalHairline() {
+    Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Line))
+}
+
+@Composable
+private fun GuidePanel() {
+    Panel {
+        SectionLabel("测量方法", "HOW TO MEASURE")
+        Step(1, "到声音最明显的房间", "关掉家里的空调、冰箱、风扇等设备，排除自家干扰。")
+        Step(2, "手机平放在桌面或地板上", "不要拿在手里，手的动作会带来低频干扰。")
+        Step(3, "开始测量并保持安静", "持续 30 秒以上，结论会随时间越来越可靠。")
+    }
+}
+
+@Composable
+private fun AnalyzingPanel(state: LiveState, result: InferenceResult) {
+    Panel {
+        SectionLabel("分析中", "ANALYZING") {
+            Text("${(state.elapsedSec / 20f * 100).roundToInt().coerceAtMost(100)}%", style = Type.NumberSmall, color = Palette.Accent)
+        }
+        Meter((state.elapsedSec / 20f).coerceIn(0f, 1f))
+        result.notes.forEach { Text(it, style = Type.BodySmall, color = Palette.TextMid) }
+    }
+}
+
+@Composable
+private fun ResultPanel(result: InferenceResult) {
+    val top = result.top!!
+    Panel {
+        SectionLabel("判断依据", "REASONING") {
+            Tag(if (result.ready) "推断结果" else "继续测量中", color = if (result.ready) Palette.Positive else Palette.Accent, filled = true)
+        }
+        Text(top.reason, style = Type.Body, color = Palette.TextHigh)
+        Hairline()
+        SectionLabel("排查建议", "NEXT STEPS")
+        Text(top.advice, style = Type.BodySmall, color = Palette.TextMid)
+
+        val others = result.candidates.drop(1)
+        if (others.isNotEmpty()) {
+            Hairline()
+            SectionLabel("其他可能", "ALTERNATIVES")
+            others.forEach { c ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.title, style = Type.BodySmall, color = Palette.TextHigh, modifier = Modifier.weight(1f))
+                        Text("${(c.confidence * 100).roundToInt()}%", style = Type.NumberSmall, color = Palette.TextMid)
+                    }
+                    Meter(c.confidence.toFloat(), color = Palette.TextMid, height = 2.dp)
+                }
+            }
+        }
+        result.notes.forEach {
+            Text("※ $it", style = Type.Caption, color = Palette.TextLow)
+        }
+    }
+}
+
+@Composable
+private fun Banner(text: String, color: Color, action: String?, onAction: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        Modifier.fillMaxWidth().background(color.copy(alpha = 0.10f), shape).border(1.dp, color.copy(alpha = 0.35f), shape)
+            .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = Type.BodySmall, color = Palette.TextHigh, modifier = Modifier.weight(1f).padding(vertical = 6.dp))
+        if (action != null) TextAction(action, onAction, color = color)
+    }
+}
+
 @Composable
 private fun SaveDialog(onDismiss: () -> Unit, onConfirm: (String, Condition?) -> Unit) {
     var label by remember { mutableStateOf("") }
     var condition by remember { mutableStateOf<Condition?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("保存测量") },
+        containerColor = Palette.SurfaceHigh,
+        title = { Text("保存测量", style = Type.Heading, color = Palette.TextHigh) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -126,14 +254,17 @@ private fun SaveDialog(onDismiss: () -> Unit, onConfirm: (String, Condition?) ->
                     onValueChange = { label = it },
                     label = { Text("名称，如「主卧床头」") },
                     singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
                 )
-                Spacer(Modifier.height(12.dp))
-                Text("对比用途（可选）", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(18.dp))
+                SectionLabel("对比用途", "OPTIONAL")
+                Spacer(Modifier.height(4.dp))
                 Text(
                     "成对保存后，在「记录」页对比时会自动解读，比如开窗和关窗各测一次。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = Type.Caption,
+                    color = Palette.TextLow,
                 )
+                Spacer(Modifier.height(6.dp))
                 ConditionOption("不用于对比", condition == null) { condition = null }
                 Condition.entries.forEach { c ->
                     ConditionOption("${c.template.title}：${c.label}", condition == c) { condition = c }
@@ -141,7 +272,7 @@ private fun SaveDialog(onDismiss: () -> Unit, onConfirm: (String, Condition?) ->
             }
         },
         confirmButton = { TextButton(onClick = { onConfirm(label.trim(), condition) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消", color = Palette.TextMid) } },
     )
 }
 
@@ -152,75 +283,6 @@ private fun ConditionOption(text: String, selected: Boolean, onClick: () -> Unit
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onClick)
-        Text(text, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-@Composable
-private fun ConclusionCard(state: LiveState) {
-    val result = state.inference
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            when {
-                result == null -> Guide()
-                result.candidates.isEmpty() -> {
-                    Text("正在分析…", style = MaterialTheme.typography.titleMedium)
-                    LinearProgressIndicator(
-                        progress = { (state.elapsedSec / 20f).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    result.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                }
-                else -> Result(result)
-            }
-        }
-    }
-}
-
-@Composable
-private fun Guide() {
-    Text("怎么测", style = MaterialTheme.typography.titleMedium)
-    Text(
-        "1. 到声音最明显的房间，关掉家里的空调、冰箱、风扇等设备。\n" +
-            "2. 把手机平放在桌面或地板上，不要拿在手里。\n" +
-            "3. 点「开始测量」，保持安静 30 秒以上。",
-        style = MaterialTheme.typography.bodyMedium,
-    )
-}
-
-@Composable
-private fun Result(result: InferenceResult) {
-    val top = result.top!!
-    Text(if (result.ready) "推断结果" else "初步推断（继续测量中）", style = MaterialTheme.typography.labelLarge)
-    Text(top.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-    ConfidenceBar(top)
-    Text(top.reason, style = MaterialTheme.typography.bodyMedium)
-    Text("建议：${top.advice}", style = MaterialTheme.typography.bodyMedium)
-
-    val others = result.candidates.drop(1)
-    if (others.isNotEmpty()) {
-        HorizontalDivider()
-        Text("其他可能", style = MaterialTheme.typography.labelLarge)
-        others.forEach { c ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(c.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("${(c.confidence * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-    }
-    result.notes.forEach {
-        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun ConfidenceBar(c: Candidate) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        LinearProgressIndicator(progress = { c.confidence.toFloat() }, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(8.dp))
-        Text("可能性 ${(c.confidence * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall)
+        Text(text, style = Type.BodySmall, color = if (selected) Palette.TextHigh else Palette.TextMid)
     }
 }

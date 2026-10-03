@@ -172,11 +172,11 @@ class DisplayRenderer(
         private const val SMOOTHING = 0.3
         private const val WATERFALL_RANGE_DB = 50.0
 
-        /** magma 色带的 256 级查找表。 */
+        /** 暖色调色带（黑 → 深棕 → 琥珀 → 奶白），与界面的琥珀强调色一致。 */
         val COLORS: IntArray = run {
             val stops = listOf(
-                0.0 to 0x000004, 0.2 to 0x2C115F, 0.4 to 0x721F81,
-                0.6 to 0xB73779, 0.8 to 0xF1605D, 0.9 to 0xFEAF77, 1.0 to 0xFCFDBF,
+                0.0 to 0x0B0B0D, 0.22 to 0x1E1409, 0.42 to 0x4A2A0B, 0.6 to 0x8F4E0E,
+                0.76 to 0xD9821E, 0.88 to 0xFFB547, 1.0 to 0xFFF1D2,
             )
             IntArray(256) { i ->
                 val t = i / 255.0
